@@ -1,0 +1,250 @@
+---
+title: "Sports Analytics Project"
+author: "Ian Keller"
+date: "2023-10-19"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Reading in Each CSV
+```{r}
+advanced_stats = read.csv('Player Season Totals - 2022-23 Advanced Stats.csv')
+
+basic_stats = read.csv('Player Season Totals - 2022-23 Basic Stats.csv')
+
+player_bio = read.csv('Player Season Totals - 2022-23 Player Bios.csv')
+```
+
+Merging Data Sets Based on Name
+
+```{r}
+#Combining the player bio and basic stats data sets
+combined_data <- merge(player_bio, basic_stats, by = "Player")
+
+#Combining the advanced stats with the previously merged data
+combined_data2 <- merge(advanced_stats, combined_data, by = "Player")
+```
+
+Adding in the salary dataset
+```{r}
+player_salary = read.csv("2022-2023 Player Salaries.csv")
+#Indexing only the player name and salary columns
+player_and_salary <- player_salary[, c("Name", "AAV")]
+
+#Renaming the "Name" Column to "Player" for a proper merge
+library("dplyr")
+player_and_salary <- player_and_salary %>%
+  rename(Player = Name)
+
+#Renaming the player columns to match case sensitivity
+combined_data2$Player <- tolower(combined_data2$Player)
+player_and_salary$Player <- tolower(player_and_salary$Player)
+
+#Finally merging all the data into the final dataset
+final_data <- merge(combined_data2, player_and_salary, by = "Player")
+```
+
+
+Next, I will have to clean the data. Remove irrelevant and duplicate columns as we move closer towards analysis.
+-For starters, I want to remove some count variables like Corsi For and Corsi Against and leave Corsi %
+```{r}
+library(dplyr)
+cleaned_data <- final_data %>% select(-CF,-CA,-FF,-FA,-SF,-SA,-GF,-GA,-xGF,-xGA,-SCF,-SCA,-HDCF,-HDCA,-HDGF,-HDGA, -MDCF,-MDCA,-MDGF,-MDGA,-LDCF,-LDCA,-LDGF,-LDGA,-Off..Zone.Starts,-Neu..Zone.Starts,-Def..Zone.Starts,-On.The.Fly.Starts,-Off..Zone.Faceoffs,-Neu..Zone.Faceoffs,-Def..Zone.Faceoffs,-X.x,-Team.x,-Position.x,-Birth.Country,-Birth.City,-Date.of.Birth,-Draft.Team,-Round.Pick,-X.y,-Team.y,-Position.y,-GP.y,-X,-Faceoffs.Won,-Faceoffs.Lost,-Hits.Taken,-iCF,-iFF,-iSCF,-iHDCF,-SH.,-ixG,-Total.Penalties,-Minor,-Major,-Misconduct,-FF,-TOI.y,-Team, -On.Ice.SH.,-On.Ice.SV.,-HDCF.,-Nationality,-Birth.State.Province)
+```
+I now want to convert some count statistics to rate variables. Additionally, I want to create a variable called "Years_since_draft" as I believe the longer they have been in the league can correlate to higher salaries. I expect this variable to be normally distributed as well, meaning that the middle of the career is the highest with two tails at a young and old age.
+```{r}
+library(dplyr)
+
+#Converting Draft.Year collumn to a numeric value
+cleaned_data$Draft.Year <- as.numeric(cleaned_data$Draft.Year)
+
+cleaned_data2 <- cleaned_data %>%
+  mutate(
+    GPG = Goals / GP.x,
+    TOIpg = TOI.x / GP.x,
+    AsPG = Total.Assists / GP.x,
+    Primary_AsPG = First.Assists / GP.x,
+    Secondary_AsPG = Second.Assists / GP.x,
+    Years_since_draft = abs(Draft.Year - 2022),
+    PPG = Total.Points / GP.x)
+```
+Testing if there are any duplicate names
+```{r}
+library(dplyr)
+
+non_unique_players <- cleaned_data2 %>%
+  group_by(Player) %>%
+  filter(n() > 1) %>%
+  arrange(Player)
+
+print(unique(non_unique_players$Player))
+```
+There were 16 duplicate sebastian aho rows, but only two players in the league with that name. This will filter it out to show the two proper rows.
+```{r}
+library(dplyr)
+
+non_unique_players <- non_unique_players[c(3, 14), ]
+
+```
+Merging the two datasets
+```{r}
+other_players_data <- cleaned_data2 %>%
+  filter(Player != "sebastian aho")
+
+# Combine the two datasets
+all_data_filtered <- bind_rows(non_unique_players, other_players_data)
+```
+
+Removing all NA values for salary and renaming AAV to Salary
+```{r}
+all_data_filtered <- na.omit(all_data_filtered, cols = "AAV")
+#Renaming AAV
+all_data_filtered <- all_data_filtered %>%
+  rename(Salary = AAV)
+```
+
+Furthermore, I need to transform Salary from a string to an integer
+```{r}
+library(readr)
+
+all_data_filtered$Salary <- parse_number(all_data_filtered$Salary)
+```
+Multiplying Salary by 1,000,000
+```{r}
+all_data_filtered$Salary <- all_data_filtered$Salary * 1000000
+```
+
+Removing salaries of 0
+```{r}
+library(dplyr)
+
+all_data_filtered <- all_data_filtered %>%
+  filter(Salary != 0 & GP.x >= 41)
+```
+
+Looking at some descriptive statistics. First let's inspect the dependent variable of salary (AAV).
+
+```{r}
+library(ggplot2)
+library(scales)
+
+ggplot(all_data_filtered, aes(x = Salary)) +
+  geom_histogram(bins = 10, fill = "darkgrey", color = "white") +
+  theme_minimal() +
+  scale_x_continuous(labels = scales::comma, breaks = scales::pretty_breaks(n = 12)) +
+  labs(title = "Histogram of Salary", x = "Salary (in dollars)", y = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+Performing a log transformation
+```{r}
+all_data_filtered$Log_salary <- log(all_data_filtered$Salary)
+```
+Histogram of Log Salaries
+```{r}
+library(ggplot2)
+library(scales)
+
+ggplot(all_data_filtered, aes(x = Log_salary)) +
+  geom_histogram(bins = 10, fill = "darkgrey", color = "white") +
+  theme_minimal() +
+  scale_x_continuous(labels = scales::comma, breaks = scales::pretty_breaks(n = 12)) +
+  labs(title = "Histogram of Salary Transformed", x = "Salary (Log Transformed)", y = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+
+5 number summary
+```{r}
+# Calculate the 5-number summary for the Salary variable
+five_num_summary <- summary(all_data_filtered$Salary)
+print(five_num_summary)
+```
+Creating a binary column for Offense vs Defense
+```{r}
+all_data_filtered$Offense_defense <- ifelse(all_data_filtered$Position == "D",1,0)
+```
+Plotting Points Per Game against Salary
+```{r}
+model <- lm(Salary / 1e6 ~ PPG, data = all_data_filtered)
+plot(all_data_filtered$PPG, all_data_filtered$Salary / 1e6, pch = 19, xlab = "Points Per Game (5v5)", ylab = "Salary (Millions of dollars)", main = "Points Per Game vs Salary")
+abline(model, col = "black")
+```
+Creating a subset of data for a correlation plot
+```{r}
+library(dplyr)
+subset <- all_data_filtered %>%
+  ungroup() %>%
+  select(Salary, TOIpg, Overall.Draft.Position, PPG, Offense_defense, Years_since_draft)
+```
+Creating the correlation plot
+```{r}
+library(corrplot)
+subset2 <- data.frame(lapply(subset, as.numeric))
+#Transforming Draft Position to a numeric value before creating the model
+all_data_filtered$Overall.Draft.Position <- as.numeric(all_data_filtered$Overall.Draft.Position)
+# Calculate the correlation matrix
+correlation_matrix = cor(subset2)
+corrplot(correlation_matrix, method = "color", addCoef.col = "black")
+```
+
+Creating a multiple regression model for our hypothesized significant variables
+```{r}
+hypothesized_best_model <- lm(Log_salary ~ TOIpg + Overall.Draft.Position + PPG + Offense_defense + Years_since_draft, data = all_data_filtered)
+summary(hypothesized_best_model)
+```
+Using all subsets regression to find the best possible model using all of our predictors
+```{r}
+#First I will need to create a subset of the data frame
+full_predictors <- all_data_filtered[c(
+  "Log_salary", "CF.", "FF.", "SF.", "xGF.", "SCF.", "PDO", "Draft.Round",
+  "Overall.Draft.Position", "IPP", "Shots", "Rush.Attempts", "Rebounds.Created", "PIM",
+  "Penalties.Drawn", "Giveaways", "Takeaways", "Hits", "Shots.Blocked", "GPG", "TOIpg",
+  "AsPG", "Years_since_draft", "Offense_defense", "GF.", "HDGF.", "MDGF.", "LDGF.", "PPG"
+)]
+
+#Making the entire df numeric
+library(dplyr)
+
+full_predictors <- full_predictors %>%
+  mutate_all(as.numeric)
+
+```
+Running the all subsets regression based on adjr2
+```{r}
+require(MASS)
+
+min_model = lm(Log_salary ~ 1, data = full_predictors)
+max_model = lm(Log_salary ~ CF. + FF. + SF. + xGF. + SCF. + PDO + Draft.Round + Overall.Draft.Position + IPP + Shots + Rush.Attempts + Rebounds.Created + PIM + Penalties.Drawn + Giveaways + Takeaways + Hits + Shots.Blocked + GPG + TOIpg + AsPG + Years_since_draft + Offense_defense + GF. + HDGF. + MDGF. + LDGF. + PPG, data = full_predictors)
+
+best_model = step(min_model, scope = formula(max_model), direction = "both", k = log(538))
+
+```
+Summary Statistics and ANOVA table of the best model
+```{r}
+best_BIC_model = lm(Log_salary ~ AsPG + Years_since_draft + Shots + TOIpg + Offense_defense + 
+    Overall.Draft.Position + Draft.Round, data = full_predictors)
+
+summary(best_BIC_model)
+anova(best_BIC_model)
+```
+Plotting the hypothesized and best BIC model residuals
+```{r}
+plot(full_predictors$Log_salary, residuals(hypothesized_best_model), pch =19, main = "Residual Plot of Hypothesized Best Model", xlab ="Fitted Values", ylab = "Residuals")
+abline(h=0,col="red")
+```
+```{r}
+plot(full_predictors$Log_salary, residuals(best_BIC_model), pch =19, main = "Residual Plot of BIC Best Model", xlab ="Fitted Values", ylab = "Residuals")
+abline(h=0,col="red")
+```
+Running the full model
+```{r}
+full_model = lm(Log_salary ~ PPG + CF. + FF. + SF. + xGF. + SCF. + PDO + Draft.Round + Overall.Draft.Position + IPP + Shots + Rush.Attempts + Rebounds.Created + PIM + Penalties.Drawn + Giveaways + Takeaways + Hits + Shots.Blocked + GPG + TOIpg + Years_since_draft + Offense_defense + GF. + HDGF. + MDGF. + LDGF., data = full_predictors)
+summary(full_model)
+```
+
+
